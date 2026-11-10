@@ -1,3 +1,32 @@
+x-backend-environment: &backend-environment
+  NODE_ENV: ${NODE_ENV:-development}
+  PORT: ${PORT:-3000}
+  DB_HOST: db
+  DB_PORT: 5432
+  DB_USERNAME: ${DB_USERNAME:-streamtube}
+  DB_PASSWORD: ${DB_PASSWORD:-streamtube}
+  DB_NAME: ${DB_NAME:-streamtube}
+  JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+  JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-refresh-in-production}
+  JWT_ACCESS_EXPIRATION: ${JWT_ACCESS_EXPIRATION:-15m}
+  JWT_REFRESH_EXPIRATION: ${JWT_REFRESH_EXPIRATION:-7d}
+  CONFIRMATION_TOKEN_EXPIRATION_HOURS: ${CONFIRMATION_TOKEN_EXPIRATION_HOURS:-1}
+  PASSWORD_RESET_TOKEN_EXPIRATION_HOURS: ${PASSWORD_RESET_TOKEN_EXPIRATION_HOURS:-1}
+  APP_URL: ${APP_URL:-http://localhost:3000}
+  MAIL_HOST: mailpit
+  MAIL_PORT: 1025
+  MAIL_FROM: ${MAIL_FROM:-noreply@streamtube.com}
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  VIDEO_WORKER_CONCURRENCY: ${VIDEO_WORKER_CONCURRENCY:-1}
+  OBJECT_STORAGE_ENDPOINT: http://minio:9000
+  OBJECT_STORAGE_PUBLIC_ENDPOINT: ${OBJECT_STORAGE_PUBLIC_ENDPOINT:-http://localhost:9000}
+  OBJECT_STORAGE_REGION: ${OBJECT_STORAGE_REGION:-us-east-1}
+  OBJECT_STORAGE_BUCKET: ${OBJECT_STORAGE_BUCKET:-streamtube-videos}
+  OBJECT_STORAGE_ACCESS_KEY_ID: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+  OBJECT_STORAGE_SECRET_ACCESS_KEY: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+  OBJECT_STORAGE_CREATE_BUCKET: ${OBJECT_STORAGE_CREATE_BUCKET:-true}
+
 services:
   nestjs-api:
     build: 
@@ -7,20 +36,46 @@ services:
       - 3000:3000
     volumes:
       - .:/home/node/app
+      - node_modules:/home/node/app/node_modules
+    environment: *backend-environment
     depends_on:
       db:
         condition: service_healthy
       mailpit:
         condition: service_started
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  video-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/home/node/app
+      - node_modules:/home/node/app/node_modules
+    environment: *backend-environment
+    command:
+      - sh
+      - -c
+      - 'until test -x node_modules/.bin/nest; do echo "Waiting for NestJS dependencies"; sleep 5; done; npm run start:worker:dev'
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
 
   db:
     image: postgres:17
     ports:
       - "5432:5432"
     environment:
-      - POSTGRES_USER=streamtube
-      - POSTGRES_PASSWORD=streamtube
-      - POSTGRES_DB=streamtube
+      POSTGRES_USER: ${DB_USERNAME:-streamtube}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-streamtube}
+      POSTGRES_DB: ${DB_NAME:-streamtube}
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U streamtube"]
       interval: 5s
@@ -33,4 +88,35 @@ services:
       - "1025:1025"
       - "8025:8025"
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
+  minio:
+    image: bitnamilegacy/minio:2025.5.24
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: ${OBJECT_STORAGE_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${OBJECT_STORAGE_SECRET_ACCESS_KEY:-minioadmin}
+      MINIO_DATA_DIR: /bitnami/minio/data
+      MINIO_API_PORT_NUMBER: 9000
+      MINIO_CONSOLE_PORT_NUMBER: 9001
+    volumes:
+      - minio_data:/bitnami/minio/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/ready"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  node_modules:
+  minio_data:

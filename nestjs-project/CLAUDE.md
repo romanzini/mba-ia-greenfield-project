@@ -2,7 +2,7 @@
 
 ## Environment Startup Verification
 
-**Default behavior:** starting the environment means starting **only infrastructure services** (database, mail, etc.) — **never** start the NestJS application server unless the user explicitly asks to run/serve the project (e.g., "rode o projeto", "suba o servidor", "run the app").
+**Default behavior:** starting the environment means starting infrastructure and the dedicated video worker — **never** start the NestJS HTTP application server unless the user explicitly asks to run/serve the project (e.g., "rode o projeto", "suba o servidor", "run the app").
 
 After starting infrastructure, always confirm the containers are up before proceeding:
 
@@ -10,11 +10,14 @@ After starting infrastructure, always confirm the containers are up before proce
 docker compose ps   # all services must show status "running"
 ```
 
-Then verify each infrastructure service is actually ready to accept connections — not just running:
+Then verify the infrastructure is actually ready to accept connections — not just running:
 
 - **PostgreSQL:** `docker compose exec db pg_isready -U streamtube` — expect `accepting connections`
+- **Redis:** `docker compose exec redis redis-cli ping` — expect `PONG`
+- **MinIO:** `curl -f http://localhost:9000/minio/health/ready`
+- **Video worker:** `docker compose logs --tail=50 video-worker` — confirm the Nest application context initialized and the worker is listening.
 
-Only start the NestJS dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
+Only start the NestJS HTTP dev server (`npm run start:dev`) when the user **explicitly** asks to run the application — never as part of "start the environment".
 
 ## Development Environment
 
@@ -34,6 +37,9 @@ docker compose exec nestjs-api npm run start:dev
 Services:
 - `nestjs-api` — NestJS API, port `3000`
 - `db` — PostgreSQL 17, port `5432`, database `streamtube`, user/password `streamtube`
+- `redis` — BullMQ job queue, port `6379`
+- `minio` — private S3-compatible storage, API port `9000`, console port `9001`
+- `video-worker` — dedicated FFmpeg/FFprobe job processor; no public port
 
 All verification and teardown commands run on the **host machine**:
 
@@ -46,7 +52,9 @@ docker compose exec db pg_isready -U streamtube
 
 # Check container logs
 docker compose logs nestjs-api
+docker compose logs video-worker
 docker compose logs db
+curl -f http://localhost:9000/minio/health/ready
 
 # Tear down the entire environment
 docker compose down
@@ -148,6 +156,14 @@ NestJS with standard module structure. Source lives in `src/`, compiled output i
 
 - Each domain feature gets its own module (e.g., `UsersModule`, `VideosModule`) registered in `AppModule`
 - Controllers handle HTTP routing; Services hold business logic; both are scoped to their module
+
+### Video upload and delivery
+
+- Uploads use S3-compatible multipart storage directly from the client via presigned part URLs; the API does not receive video bodies. The maximum file size is 10 GB and each part is 64 MiB.
+- `POST /videos/uploads` requires an `originalFilename`, non-empty `title`, video `contentType`, and `fileSizeBytes`. Authenticated owners manage part URLs, completion, and abort.
+- Redis/BullMQ sends completed videos to the separate `video-worker`; FFprobe validates/extracts metadata and FFmpeg creates the thumbnail.
+- Anonymous metadata, thumbnail, stream, and download routes expose only ready videos. Streaming supports one HTTP byte range; object keys and multipart IDs remain private.
+- Keep S3, Redis, and database service hosts set to their Docker Compose service names. Configure the production bucket's CORS policy to allow browser `PUT` uploads and expose `ETag`.
 
 ## Code Conventions
 

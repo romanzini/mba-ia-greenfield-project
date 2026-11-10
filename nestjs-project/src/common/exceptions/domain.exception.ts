@@ -48,3 +48,43 @@ export class TokenReuseDetectedException extends DomainException {
     );
   }
 }
+
+export class VideoNotFoundException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_FOUND', 404, 'Video was not found');
+  }
+}
+
+export class VideoNotReadyException extends DomainException {
+  constructor() {
+    super('VIDEO_NOT_READY', 404, 'Video is not available');
+  }
+}
+
+export class InvalidVideoUploadException extends DomainException {
+  constructor(message: string) {
+    super('INVALID_VIDEO_UPLOAD', 400, message);
+  }
+}
+
+export class VideoUploadStateException extends DomainException {
+  constructor(message: string) {
+    super('VIDEO_UPLOAD_STATE', 409, message);
+  }
+}
+
+export class ChannelNotFoundException extends DomainException {
+  constructor() {
+    super('CHANNEL_NOT_FOUND', 404, 'Channel was not found');
+  }
+}
+
+export class VideoRangeNotSatisfiableException extends DomainException {
+  constructor(public readonly fileSize: number) {
+    super(
+      'VIDEO_RANGE_NOT_SATISFIABLE',
+      416,
+      'Requested byte range is invalid',
+    );
+  }
+}

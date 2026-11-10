@@ -1,20 +1,33 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exportSpec } from './openapi-export';
 
 describe('exportSpec (integration)', () => {
   let outputPath: string;
   let document: Record<string, unknown>;
 
-  beforeAll(async () => {
+  beforeAll(() => {
     outputPath = join(tmpdir(), `openapi-test-${Date.now()}.json`);
-    await exportSpec(outputPath);
+    execFileSync('npm', ['run', 'build'], { stdio: 'inherit' });
+    execFileSync(
+      'node',
+      [
+        '-e',
+        "require('./dist/openapi-export').exportSpec(process.argv[1]).catch(error => { console.error(error); process.exitCode = 1; })",
+        outputPath,
+      ],
+      { stdio: 'inherit' },
+    );
     document = JSON.parse(readFileSync(outputPath, 'utf-8')) as Record<
       string,
       unknown
     >;
-  }, 30_000);
+  }, 60_000);
+
+  afterAll(() => {
+    rmSync(outputPath, { force: true });
+  });
 
   it('exports a valid OpenAPI 3.x document', () => {
     expect(document.openapi).toMatch(/^3\./);
@@ -64,6 +77,25 @@ describe('exportSpec (integration)', () => {
     expect(props).toHaveProperty('error');
     expect(props).toHaveProperty('message');
     expect(props).toHaveProperty('code');
+  });
+
+  it('exports the complete video upload request DTO schema', () => {
+    const components = document.components as Record<string, unknown>;
+    const schemas = components.schemas as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const uploadProperties = schemas['CreateVideoUploadDto']
+      .properties as Record<string, unknown>;
+
+    expect(Object.keys(uploadProperties)).toEqual(
+      expect.arrayContaining([
+        'originalFilename',
+        'title',
+        'contentType',
+        'fileSizeBytes',
+      ]),
+    );
   });
 
   it('has at least one path with a 401 response referencing ApiErrorEnvelope', () => {

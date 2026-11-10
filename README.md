@@ -43,24 +43,25 @@ O projeto é um monorepo baseado em containers Docker. Cada subprojeto sobe sua 
 
 - **Frontend** (Next.js 16, App Router + React Server Components) — interface da plataforma. Segue o **modelo BFF**: o navegador nunca chama a API NestJS diretamente; todo tráfego passa por Route Handlers same-origin em `app/api/**`, que fazem proxy server-side para a API.
 - **API** (NestJS 11) — regras de negócio, autenticação (JWT + refresh token rotation), envio de e-mails e acesso ao banco.
-- **Database** (PostgreSQL 17) — usuários, canais e tokens de autenticação.
+- **Database** (PostgreSQL 17) — usuários, canais, tokens de autenticação e vídeos.
 - **Email Service** (Mailpit) — captura os e-mails transacionais (confirmação de conta e recuperação de senha) em uma UI local.
-- **Video Worker** (FFmpeg) — processamento de vídeos *(planejado — Fase 03)*.
-- **Object Storage** (S3/MinIO) — arquivos de vídeo e thumbnails *(planejado — Fase 03)*.
-- **Message Queue** — fila de processamento de vídeos *(planejado — Fase 03)*.
+- **Video Worker** (FFmpeg) — extrai metadados e gera thumbnails em segundo plano.
+- **Object Storage** (S3/MinIO) — armazena vídeos e thumbnails em bucket privado; upload multipart usa URLs pré-assinadas.
+- **Message Queue** (Redis/BullMQ) — fila persistente de processamento de vídeos.
 
 O diagrama de arquitetura completo (C4) está em `docs/diagrams/software-arch.mermaid`.
+O escopo e os endpoints do backend de vídeos estão descritos em [phase-03-videos.md](docs/phases/phase-03-videos/phase-03-videos.md).
 
 ## 🚀 Como rodar
 
 Os dois subprojetos têm stacks Docker **separadas**. Suba primeiro o backend, rode as migrations e depois o frontend.
 
-### 1. Backend (NestJS + PostgreSQL + Mailpit)
+### 1. Backend (NestJS + PostgreSQL + Redis + MinIO + Mailpit)
 
 ```bash
 cd nestjs-project
 
-# Sobe API, banco e Mailpit
+# Sobe banco, Mailpit, Redis, MinIO, API e worker de vídeos
 docker compose up -d
 
 # Instala dependências (apenas na primeira vez)
@@ -79,8 +80,16 @@ Serviços disponíveis:
 |---------|-------------|
 | API NestJS | http://localhost:3000 |
 | PostgreSQL | `localhost:5432` (db/user/senha: `streamtube`) |
+| Redis | `localhost:6379` |
+| MinIO S3 API | http://localhost:9000 |
+| MinIO Console | http://localhost:9001 |
 | Mailpit (UI de e-mails) | http://localhost:8025 |
 | Swagger (opcional) | http://localhost:3000/api/docs — habilite com `SWAGGER_ENABLED=true` |
+
+O `video-worker` também é iniciado pelo Compose. A API cria uploads multipart com URLs
+pré-assinadas; o cliente envia as partes diretamente ao storage, e os endpoints
+`GET /videos/:id/stream` e `GET /videos/:id/download` entregam vídeos prontos pela API.
+Consulte o plano da fase para o ciclo completo de upload e os demais endpoints.
 
 ### 2. Frontend (Next.js)
 
@@ -173,7 +182,7 @@ green-field-ia-project/
 │   │   ├── config/                      # Configs namespaced (Joi)
 │   │   └── database/                    # data-source, migrations e seeds
 │   ├── test/                            # Testes e2e
-│   ├── compose.yaml                     # Docker Compose (API + PostgreSQL + Mailpit)
+│   ├── compose.yaml                     # Docker Compose (API, worker e infraestrutura)
 │   └── Dockerfile.dev
 ├── next-frontend/                       # Frontend (Next.js 16, App Router)
 │   ├── app/                             # Rotas, layouts, páginas e Route Handlers BFF
